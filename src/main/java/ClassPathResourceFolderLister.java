@@ -1,134 +1,137 @@
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
 import java.util.zip.ZipEntry;
-import java.util.zip.ZipException;
 import java.util.zip.ZipFile;
+
+/**
+ * http://www.uofr.net/~greg/java/get-resource-listing.html
+ */
 
 /**
  * List entries of a subfolder of an entry in the class path, which may consist of file system folders and .jars.
  */
 public class ClassPathResourceFolderLister {
+
+  private static final Logger LOGGER = LoggerFactory.getLogger(ClassPathResourceFolderLister.class);
+
   /**
-   * For each entry in the classpath, verify that (a) "folder" exists, and (b) that it has child content, and if
-   * so return the child entries (be they files, or folders).  If neither (a) nor (b) are true for a particular
-   * class path entry, move on to the next entry and try again.
+   * For each entry in the classpath, verify that (a) "folder" exists, and (b) "folder" has child content, and if
+   * these conditions hold,  return the child entries (be they files, or folders).  If neither (a) nor (b) are true for
+   * a particular class path entry, move on to the next entry and try again.
    *
    * @param folder the folder to match within the class path entry
-   *
    * @return the subfolder items of the first matching class path entry, with a no duplicates guarantee
    */
   public static Collection<String> getFolderListing(final String folder) {
     final String classPath = System.getProperty("java.class.path", ".");
     final String[] classPathElements = classPath.split(System.getProperty("path.separator"));
-    List<String> classPathElementsList = new ArrayList<String> ( Arrays.asList(classPathElements));
+    List<String> classPathElementsList = new ArrayList<String>(Arrays.asList(classPathElements));
 
     return getFolderListingForFirstMatchInClassPath(folder, classPathElementsList);
   }
 
-  private static Collection<String>
-  getFolderListingForFirstMatchInClassPath(String folder,
-                                           List<String> classPathElementsList) {
-    final Collection<String> retval = new HashSet<String>();
-    System.out.println("folder:" + folder);
-    if (folder.equals("/")) {
-        folder = "";             // handle degenerate case, if not in this block than any string starting or ending with "/" has at least two characters
-    } else {
-      if (folder.endsWith("/")) {
-        folder = folder.substring(0, folder.length()-1);
-      }
-      if (folder.startsWith("/")) {
-        folder = folder.substring(1, folder.length());
-      }
+  // not private so we can unit test
+  static Collection<String> getFolderListingForFirstMatchInClassPath(final String folder,
+                                                                     List<String> classPathElementsList) {
+    if (LOGGER.isDebugEnabled()) {
+      LOGGER.debug(
+          "getFolderListing for " + folder + " with classpath elements " + classPathElementsList);
     }
 
-    if (folder.startsWith("/") || folder.endsWith("/")) {
-      throw new IllegalArgumentException("too many consecutive slashes in folder specification: " + folder);
-    }
-
-    classPathElementsList.add("/tmp/sample.jar");
+    Collection<String> retval = new HashSet<String>();
+    String cleanedFolder = stripTrailingAndLeadingSlashes(folder);
     for (final String element : classPathElementsList) {
       System.out.println("class path element:" + element);
-      retval.addAll(getFolderListing(element, folder));
+      retval = getFolderListingFromJarOrDirectory(element, cleanedFolder);
 
       if (retval.size() > 0) {
-        System.out.println("found matching folder in class path list. taking what we find in first matching folder");
+        if (LOGGER.isDebugEnabled()) {
+          LOGGER.debug("found matching folder in class path list. returning: " + retval);
+        }
         return retval;
       }
     }
-    return new HashSet<String>();   // nothing found
-  }
-
-  private static Collection<String> getFolderListing(
-      final String element,
-      final String pattern) {
-    final Collection<String> retval = new HashSet<>();
-    final File file = new File(element);
-    if (file.isDirectory()) {
-      retval.addAll(getFolderContentsListingFromSubfolder(file, pattern));
-    } else {
-      retval.addAll(getResourcesFromJarFile(file, pattern));
-    }
     return retval;
   }
 
-  private static Collection<String> getResourcesFromJarFile(
-      final File file,
-       String pattern) {
-    try {
-      System.out.println("jar file:" + file.getCanonicalPath().toString());
-    } catch(Exception e) {
-      System.out.println("io erorr:" + e.getStackTrace());
+  private static String stripTrailingAndLeadingSlashes(final String folder) {
+    String stripped = folder;
+
+    if (stripped.equals("/")) {  // handle degenerate case:
+      return "";
+    } else { // handle cases for strings starting or ending with "/", confident that we have at least two characters
+      if (stripped.endsWith("/")) {
+        stripped = stripped.substring(0, stripped.length() - 1);
+      }
+      if (stripped.startsWith("/")) {
+        stripped = stripped.substring(1, stripped.length());
+      }
+      if (stripped.startsWith("/") || stripped.endsWith("/")) {
+        throw new IllegalArgumentException("too many consecutive slashes in folder specification: " + stripped);
+      }
     }
-    final String leadingPathOfZipEntry = pattern.toString() + "/";
+
+    return stripped;
+  }
+
+  private static Collection<String> getFolderListingFromJarOrDirectory(final String element, final String folderName) {
+    final File file = new File(element);
+    if (file.isDirectory()) {
+      return getFolderContentsListingFromSubfolder(file, folderName);
+    } else {
+      return getResourcesFromJarFile(file, folderName);
+    }
+  }
+
+  private static Collection<String> getResourcesFromJarFile(final File file, final String folderName) {
+    final String leadingPathOfZipEntry = folderName + "/";
     final HashSet<String> retval = new HashSet<String>();
-    ZipFile zf;
+    ZipFile zf = null;
     try {
       zf = new ZipFile(file);
-    } catch (final ZipException e) {
-      throw new Error(e);
-    } catch (final IOException e) {
-      throw new Error(e);
-    }
-    final Enumeration e = zf.entries();
-    while (e.hasMoreElements()) {
-      final ZipEntry ze = (ZipEntry) e.nextElement();
-      final String fileName = ze.getName();
-      System.out.println("zip entry fileName:" + fileName);
-      if (fileName.startsWith(leadingPathOfZipEntry)) {
-        final String justLeafPartOfEntry = fileName.replaceFirst(leadingPathOfZipEntry,"");
-        System.out.println("justLeafPartOfEntry:" + justLeafPartOfEntry);
-        final String initSegmentOfPath = justLeafPartOfEntry.replaceFirst("/.*", "");
-        System.out.println("initSegmentOfPath:" + initSegmentOfPath);
-        if (initSegmentOfPath.length() > 0) {
-          retval.add(initSegmentOfPath);
+      final Enumeration e = zf.entries();
+      while (e.hasMoreElements()) {
+        final ZipEntry ze = (ZipEntry) e.nextElement();
+        final String fileName = ze.getName();
+        if (fileName.startsWith(leadingPathOfZipEntry)) {
+          final String justLeafPartOfEntry = fileName.replaceFirst(leadingPathOfZipEntry, "");
+          final String initSegmentOfPath = justLeafPartOfEntry.replaceFirst("/.*", "");
+          if (initSegmentOfPath.length() > 0) {
+            if (LOGGER.isTraceEnabled()) {
+              LOGGER.trace("adding:" + initSegmentOfPath);
+            }
+            retval.add(initSegmentOfPath);
+          }
+        }
+      }
+    } catch (Exception e) {
+      throw new RuntimeException("getResourcesFromJarFile failed. file=" + file + " folder=" + folderName, e);
+    } finally {
+      if (zf != null) {
+        try {
+          zf.close();
+        } catch (IOException e) {
+          LOGGER.error("getResourcesFromJarFile close failed. file=" + file + " folder=" + folderName, e);
         }
       }
     }
-    try {
-      zf.close();
-    } catch (final IOException e1) {
-      throw new Error(e1);
-    }
     return retval;
   }
 
-  private static Collection<String> getFolderContentsListingFromSubfolder(
-      final File directory,
-       String pattern) {
-    final String patAsString = pattern.toString();
-    System.out.println("patAsString:" + patAsString);
-
+  private static Collection<String> getFolderContentsListingFromSubfolder(final File directory, String folderName) {
     final HashSet<String> retval = new HashSet<String>();
-
     try {
-      final String fullPath = directory.getCanonicalPath() + "/" + patAsString;
+      final String fullPath = directory.getCanonicalPath() + "/" + folderName;
       final File subFolder = new File(fullPath);
       System.out.println("fullPath:" + fullPath);
       if (subFolder.isDirectory()) {
         final File[] fileList = subFolder.listFiles();
         for (final File file : fileList) {
-          retval .add(file.getName());
+          retval.add(file.getName());
         }
       }
     } catch (final IOException e) {
