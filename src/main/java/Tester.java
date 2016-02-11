@@ -6,7 +6,6 @@ import org.springframework.core.io.support.ResourcePatternResolver;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Collection;
-import java.util.regex.Pattern;
 
 /**
  * this class does tests.
@@ -40,11 +39,10 @@ public class Tester {
    * this method does stuff.
    */
   public static void main(String[] args) throws IOException {
-    //new Tester().test("resource-directory");
-    Pattern pattern = Pattern.compile(".*resource-directory/.*");
-    final Collection<String> list = ResourceList.getResources(pattern);
+    //new Tester().test("resourcedir");
+    final Collection<String> list = ClassPathResourceFolderLister.getFolderListing("/resource-directory/spark/");
     for(final String name : list){
-      System.out.println(name);
+      System.out.println("FINAL>" + name);
     }
   }
 }
